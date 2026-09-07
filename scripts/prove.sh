@@ -6,6 +6,18 @@ ROOT="$(realpath "$ROOT")"
 cd "$ROOT"
 export PATH="$HOME/.local/bin:$HOME/.asmp/bin:$PATH"
 
+# Proof requires the source dependency as well as installed host tools.
+# A missing checkout must never turn the test gate into a successful skip.
+if [[ ! -f "$ROOT/../prim-sim/Package.swift" ]]; then
+  echo "BLOCKED: required ../prim-sim/Package.swift is missing; Desktop source tests cannot run." >&2
+  echo "See REPRODUCIBILITY.md for the unresolved source/provenance gate." >&2
+  exit 1
+fi
+if ! command -v swift >/dev/null 2>&1; then
+  echo "BLOCKED: Swift toolchain is unavailable; Desktop source tests cannot run." >&2
+  exit 1
+fi
+
 if ! command -v prims-desktop >/dev/null 2>&1; then
   echo "prims-desktop not on PATH — install with ./scripts/install-cli.sh" >&2
   exit 1
@@ -35,8 +47,7 @@ if command -v eamd >/dev/null 2>&1; then
   eamd asmp | grep -E 'prims-desktop|imessage-chatdb|opff-dally|docket-webmcp|prim-viewer'
 fi
 
-if [[ -d ../prim-sim ]]; then
-  swift test --filter HostTests.testCLIConnectorsListsMergedOverlay \
+swift test --filter HostTests.testCLIConnectorsListsMergedOverlay \
     --filter HostTests.testCLIConfigSetPreservesOpff \
     --filter HostTests.testCLIReceiveUnknownConnectorFails \
     --filter HostTests.testCLIReceiveRejectsNonIMessageConnector \
@@ -50,8 +61,5 @@ if [[ -d ../prim-sim ]]; then
     --filter HostTests.testProductIdentityIsLocked \
     --filter HostTests.testInfoPlistAndPPPCAreBound \
     --filter HostTests.testSourcesDoNotAskFDAForLooseCLI
-else
-  echo "skip swift test (../prim-sim missing)"
-fi
 
 echo "PROVE OK"
