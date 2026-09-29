@@ -20,6 +20,10 @@ public enum DesktopCLI {
       prims-desktop asmp
       prims-desktop config get [<name>]
       prims-desktop config set <name> <field> <value>
+      prims-desktop add request <pack.prim> [<relative-target>]
+      prims-desktop add list
+      prims-desktop add approve <request-id>
+      prims-desktop add deny <request-id>
 
     --json anywhere. Overlay is ~/.prim/registry.local.json (not a second store).
     ASMP health is http://127.0.0.1:7749/health.
@@ -61,6 +65,8 @@ public enum DesktopCLI {
                 return try cmdAsmp(parsed.positionals, json: parsed.json)
             case "config":
                 return try cmdConfig(parsed.positionals, json: parsed.json)
+            case "add":
+                return try cmdAdd(parsed.positionals, json: parsed.json)
             default:
                 return fail(1, "unknown command \(parsed.command)", json: parsed.json)
             }
@@ -237,6 +243,40 @@ public enum DesktopCLI {
             "asmp connectors  \(asmp.announcedConnectors.isEmpty ? "(none announced)" : asmp.announcedConnectors.joined(separator: ", "))",
         ]
         return Result(status: 0, stdout: lines.joined(separator: "\n") + "\n", stderr: "")
+    }
+
+    private static func cmdAdd(_ positionals: [String], json: Bool) throws -> Result {
+        let action = positionals.first ?? "list"
+        switch action {
+        case "list":
+            let rows = try PendingAdd.list().map {
+                ["id": $0.id.uuidString, "source": $0.sourcePath, "sha256": $0.sourceSHA256,
+                 "profile": $0.profile, "target": $0.relativeTarget, "status": $0.status]
+            }
+            if json { return okJSON(["requests": rows]) }
+            if rows.isEmpty { return Result(status: 0, stdout: "no add requests\n", stderr: "") }
+            let text = rows.map { "\($0["id"]!)  \($0["status"]!)  \($0["profile"]!):\($0["target"]!)" }.joined(separator: "\n")
+            return Result(status: 0, stdout: text + "\n", stderr: "")
+        case "request":
+            guard positionals.count >= 2 else { return fail(1, "add request needs <pack.prim>", json: json) }
+            let source = URL(fileURLWithPath: positionals[1]).standardizedFileURL
+            let target = positionals.count >= 3 ? positionals[2] : nil
+            let req = try PendingAdd.request(source: source, relativeTarget: target)
+            if json { return okJSON(["id": req.id.uuidString, "source": req.sourcePath, "sha256": req.sourceSHA256, "profile": req.profile, "target": req.relativeTarget, "status": req.status]) }
+            return Result(status: 0, stdout: "requested \(req.id.uuidString) → \(req.profile):\(req.relativeTarget)\n", stderr: "")
+        case "approve", "deny":
+            guard positionals.count == 2, let id = UUID(uuidString: positionals[1]) else {
+                return fail(1, "add \(action) needs a request UUID", json: json)
+            }
+            if action == "deny" {
+                try PendingAdd.deny(id: id)
+                return json ? okJSON(["id": id.uuidString, "status": "denied"]) : Result(status: 0, stdout: "denied \(id.uuidString)\n", stderr: "")
+            }
+            let target = try PendingAdd.approve(id: id)
+            return json ? okJSON(["id": id.uuidString, "status": "approved", "path": target.path]) : Result(status: 0, stdout: "approved \(id.uuidString) → \(target.path)\n", stderr: "")
+        default:
+            return fail(1, "add action must be request, list, approve, or deny", json: json)
+        }
     }
 
     private static func cmdConfig(_ positionals: [String], json: Bool) throws -> Result {
